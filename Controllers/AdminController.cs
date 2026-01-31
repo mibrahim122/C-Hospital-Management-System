@@ -1,15 +1,16 @@
 using System;
+using MongoDB.Driver;
 using System.Collections.Generic;
 using System.Linq;
-using MongoDB.Driver;
 
 namespace HospitalManagementSystem
 {
     public class AdminController
     {
         private MainUI _view = new MainUI();
-        private User _admin;
+        private User _admin; // Store the admin user
 
+        // === FIXED: Restore the Constructor ===
         public AdminController(User admin)
         {
             _admin = admin;
@@ -19,144 +20,86 @@ namespace HospitalManagementSystem
         {
             while (true)
             {
-                _view.ShowTitle($"ADMIN DASHBOARD - {_admin.Name}");
-                _view.ShowMessage("1. Provider Management (Add/Remove Doctor)");
-                _view.ShowMessage("2. Staff Analytics & Revenue");
-                _view.ShowMessage("3. Appointment Oversight (Approve/Cancel)");
-                _view.ShowMessage("4. Set Doctor Scheduling");
-                _view.ShowMessage("5. Logout");
+                _view.ShowTitle($"ADMIN DASHBOARD");
+                _view.ShowMessage("1. Add New Doctor");
+                _view.ShowMessage("2. View All Doctors");
+                _view.ShowMessage("3. View All Patients");
+                _view.ShowMessage("4. Logout");
 
                 string choice = _view.GetInput("Select Option");
 
-                if (choice == "1") ProviderManagement();
-                else if (choice == "2") StaffAnalytics();
-                else if (choice == "3") Oversight();
-                else if (choice == "4") ScheduleManagement();
-                else if (choice == "5") return;
+                if (choice == "1") AddDoctor();
+                else if (choice == "2") ViewAllDoctors();
+                else if (choice == "3") ViewAllPatients();
+                else if (choice == "4") return;
             }
         }
 
-        // === FIXED METHOD with FACTORY PATTERN ===
-        private void ProviderManagement()
+        private void AddDoctor()
         {
-            _view.ShowTitle("PROVIDER MANAGEMENT");
-            _view.ShowMessage("1. Add Doctor");
-            _view.ShowMessage("2. Remove Doctor");
+            _view.ShowTitle("ADD NEW DOCTOR");
 
-            string op = _view.GetInput("Choice");
+            string name = _view.GetInput("Enter Doctor Name");
+            string username = _view.GetInput("Enter Username");
 
-            if (op == "1")
+            // CHECK FOR DUPLICATES
+            var existingUser = Database.Instance.Users.Find(u => u.Username == username).FirstOrDefault();
+            if (existingUser != null)
             {
-                string name = _view.GetInput("Name");
-                string spec = _view.GetInput("Specialization");
-                string feeStr = _view.GetInput("Consultation Fee");
-                string username = _view.GetInput("Create Username");
-                string password = _view.GetInput("Create Password");
-
-                if (double.TryParse(feeStr, out double fee))
-                {
-                    try
-                    {
-                        // USE FACTORY
-                        User newDoc = UserFactory.CreateUser("Doctor", name, username, password, spec, fee);
-
-                        // USE SINGLETON
-                        Database.Instance.Users.InsertOne(newDoc);
-
-                        _view.ShowMessage("Doctor Created via Factory!");
-                    }
-                    catch (Exception ex)
-                    {
-                        _view.ShowError($"Error: {ex.Message}");
-                    }
-                }
-                else
-                {
-                    _view.ShowError("Invalid Fee Amount.");
-                }
-            }
-            else if (op == "2")
-            {
-                string username = _view.GetInput("Enter Username to Remove");
-                // USE SINGLETON
-                var result = Database.Instance.Users.DeleteOne(u => u.Username == username && u.Role == "Doctor");
-
-                if (result.DeletedCount > 0) _view.ShowMessage("Doctor Removed.");
-                else _view.ShowError("Doctor not found.");
-            }
-            _view.PressAnyKey();
-        }
-
-        private void StaffAnalytics()
-        {
-            _view.ShowTitle("ANALYTICS");
-            // Use Singleton Database.Instance
-            var doctors = Database.Instance.Users.OfType<Doctor>().Find(_ => true).ToList();
-            var totalRevenue = Database.Instance.Invoices.AsQueryable().Sum(i => i.Amount);
-
-            _view.ShowMessage($"Total Hospital Revenue: ${totalRevenue}");
-            _view.ShowMessage($"Total Doctors: {doctors.Count}");
-            _view.PressAnyKey();
-        }
-
-        private void Oversight()
-        {
-            _view.ShowTitle("APPOINTMENT OVERSIGHT");
-            var pending = Database.Instance.Appointments.Find(a => a.Status == "Pending").ToList();
-
-            if (pending.Count == 0)
-            {
-                _view.ShowMessage("No pending appointments.");
+                _view.ShowError($"Error: The username '{username}' is already taken.");
                 _view.PressAnyKey();
                 return;
             }
 
-            for (int i = 0; i < pending.Count; i++)
+            string password = _view.GetInput("Enter Password");
+            string spec = _view.GetInput("Enter Specialization");
+
+            if (!double.TryParse(_view.GetInput("Enter Consultation Fee"), out double fee))
             {
-                _view.ShowMessage($"{i + 1}. {pending[i].PatientName} -> Dr. {pending[i].DoctorName}");
+                _view.ShowError("Invalid Fee Amount.");
+                return;
             }
 
-            string input = _view.GetInput("Select # to Approve (0 to Go Back)");
+            string slotsInput = _view.GetInput("Enter Available Slots (comma separated, e.g. 10:00 AM, 02:00 PM)");
+            List<string> slots = new List<string>(slotsInput.Split(','));
+            for (int i = 0; i < slots.Count; i++) slots[i] = slots[i].Trim();
 
-            if (int.TryParse(input, out int selection) && selection > 0 && selection <= pending.Count)
+            var newDoctor = new Doctor
             {
-                var app = pending[selection - 1];
-                var updateDef = Builders<Appointment>.Update.Set(a => a.Status, "Approved");
-                Database.Instance.Appointments.UpdateOne(a => a.Id == app.Id, updateDef);
-                _view.ShowMessage($"Success! Appointment for {app.PatientName} approved.");
+                Name = name,
+                Username = username,
+                Password = password,
+                Role = "Doctor",
+                Specialization = spec,
+                ConsultationFee = fee,
+                AvailableSlots = slots
+            };
+
+            Database.Instance.Users.InsertOne(newDoctor);
+            _view.ShowMessage("Success! Doctor Added.");
+            _view.PressAnyKey();
+        }
+
+        private void ViewAllDoctors()
+        {
+            _view.ShowTitle("ALL DOCTORS");
+            var doctors = Database.Instance.Users.OfType<Doctor>().Find(_ => true).ToList();
+
+            foreach (var d in doctors)
+            {
+                _view.ShowMessage($"Dr. {d.Name} ({d.Specialization}) - User: {d.Username}");
             }
             _view.PressAnyKey();
         }
 
-        private void ScheduleManagement()
+        private void ViewAllPatients()
         {
-            _view.ShowTitle("SCHEDULE MANAGEMENT");
+            _view.ShowTitle("ALL PATIENTS");
+            var patients = Database.Instance.Users.OfType<Patient>().Find(_ => true).ToList();
 
-            var doctors = Database.Instance.Users.OfType<Doctor>().Find(_ => true).ToList();
-            if (doctors.Count == 0)
+            foreach (var p in patients)
             {
-                _view.ShowError("No doctors found.");
-                _view.PressAnyKey();
-                return;
-            }
-
-            for (int i = 0; i < doctors.Count; i++)
-            {
-                _view.ShowMessage($"{i + 1}. Dr. {doctors[i].Name} ({doctors[i].Specialization})");
-            }
-
-            string input = _view.GetInput("Select Doctor to Add Slot");
-            if (int.TryParse(input, out int index) && index > 0 && index <= doctors.Count)
-            {
-                var doc = doctors[index - 1];
-                string newSlot = _view.GetInput("Enter Slot (e.g., 09:00 AM - 10:00 AM)");
-
-                if (!string.IsNullOrWhiteSpace(newSlot))
-                {
-                    var update = Builders<Doctor>.Update.Push(d => d.AvailableSlots, newSlot);
-                    Database.Instance.Users.OfType<Doctor>().UpdateOne(d => d.Id == doc.Id, update);
-                    _view.ShowMessage("Slot Added Successfully!");
-                }
+                _view.ShowMessage($"{p.Name} (User: {p.Username})");
             }
             _view.PressAnyKey();
         }
